@@ -1,0 +1,59 @@
+# The BreakoutIQ server and its database, for running on a tester's own computer (see services.ps1).
+# The desktop app is installed separately; it talks to the server at http://localhost:3001.
+services:
+
+  db:
+    image: timescale/timescaledb-ha:pg16
+    container_name: breakoutiq-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      POSTGRES_DB: breakoutiq
+    ports:
+      - "127.0.0.1:5433:5432"   # this computer only, not the network
+    volumes:
+      - breakoutiq_data:/home/postgres/pgdata/data
+    # The base tables come from the server image (services.ps1 loads them); the server adds the rest on start.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  server:
+    build:
+      context: docker
+      dockerfile: server.Dockerfile
+      args:
+        GITHUB_USER: ${GITHUB_USER:-7ejasVijay}
+      secrets:
+        - github_token
+    container_name: breakoutiq-server
+    # JWT_SECRET, ADMIN_SECRET, ADMIN_JWT_SECRET (created by services.ps1).
+    env_file:
+      - path: secrets/server.env
+        required: false   # so down/destroy work before the first 'up' has created it
+    environment:
+      DATABASE_URL: postgres://postgres:${DB_PASSWORD:-password}@db:5432/breakoutiq
+      VAULT_KEYS_FILE: /run/secrets/vault_keys
+      # The desktop app's own origins (Windows, macOS/Linux) and the dev server.
+      ALLOWED_ORIGINS: http://tauri.localhost,https://tauri.localhost,tauri://localhost,http://localhost:1420
+    secrets:
+      - vault_keys
+    ports:
+      - "127.0.0.1:3001:3001"   # this computer only, not the network
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  breakoutiq_data:
+
+secrets:
+  github_token:
+    environment: GITHUB_TOKEN
+  # Locks every user's broker-login vault. Losing it makes saved broker logins unreadable.
+  vault_keys:
+    file: ./secrets/vault_keys
