@@ -159,9 +159,14 @@ function Invoke-Up {
     $have = Compose exec -T db psql -U postgres -d breakoutiq -tAc "SELECT to_regclass('public.strategies') IS NOT NULL"
     if ("$have".Trim() -ne "t") {
         Write-Step "Creating the base tables..."
-        Compose run --rm --no-deps -T server cat /usr/local/share/breakoutiq/base_schema.sql |
-            Compose exec -T db psql -U postgres -d breakoutiq -q -v ON_ERROR_STOP=1 | Out-Null
+        # File copies, not a pipe: Windows PowerShell can hang piping one docker command into another.
+        $tmp = Join-Path $env:TEMP "breakoutiq_base_schema.sql"
+        Compose create --no-recreate server *> $null
+        docker cp "breakoutiq-server:/usr/local/share/breakoutiq/base_schema.sql" $tmp
+        if ($LASTEXITCODE -eq 0) { docker cp $tmp "breakoutiq-db:/tmp/base_schema.sql" }
+        if ($LASTEXITCODE -eq 0) { Compose exec -T db psql -U postgres -d breakoutiq -q -v ON_ERROR_STOP=1 -f /tmp/base_schema.sql }
         if ($LASTEXITCODE -ne 0) { Write-Err "Could not create the base tables."; exit 1 }
+        Remove-Item $tmp -ErrorAction SilentlyContinue
     }
 
     Write-Step "Starting the server..."
