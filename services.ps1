@@ -114,6 +114,17 @@ function Initialize-Secrets {
     }
 }
 
+# Waits until the database answers 3 times in a row (it restarts once while initialising a new volume).
+function Wait-Db {
+    $ok = 0
+    for ($i = 0; $i -lt 90; $i++) {
+        $r = Compose exec -T db psql -U postgres -d breakoutiq -tAc "SELECT 1" 2>$null
+        if ("$r".Trim() -eq "1") { $ok++; if ($ok -ge 3) { return $true } } else { $ok = 0 }
+        Start-Sleep -Seconds 2
+    }
+    return $false
+}
+
 function Wait-Server {
     Write-Host "    Waiting for the server" -NoNewline
     for ($i = 0; $i -lt 120; $i++) {
@@ -142,7 +153,7 @@ function Invoke-Up {
     Write-Step "Starting the database..."
     # --remove-orphans clears containers from older setups (client, scheduler, ollama).
     Compose up -d --wait --remove-orphans db
-    if ($LASTEXITCODE -ne 0) { Write-Err "The database did not start."; exit 1 }
+    if ($LASTEXITCODE -ne 0 -or -not (Wait-Db)) { Write-Err "The database did not start. See: docker logs breakoutiq-db"; exit 1 }
 
     # A brand-new database needs the base tables (strategies, companies, ...); the server adds the rest on start.
     $have = Compose exec -T db psql -U postgres -d breakoutiq -tAc "SELECT to_regclass('public.strategies') IS NOT NULL"

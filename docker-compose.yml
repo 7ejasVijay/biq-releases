@@ -15,7 +15,9 @@ services:
       - breakoutiq_data:/home/postgres/pgdata/data
     # The base tables come from the server image (services.ps1 loads them); the server adds the rest on start.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      # Over TCP: on first start the image runs a temporary socket-only Postgres to initialise, then restarts it;
+      # a socket check passes during that and the real server isn't up yet.
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
       interval: 5s
       timeout: 5s
       retries: 10
